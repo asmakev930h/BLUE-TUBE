@@ -1,48 +1,45 @@
 const express = require('express');
-const ytSearch = require('yt-search');
+const http = require('http');
+const socketIo = require('socket.io');
 const path = require('path');
-const cors = require('cors');
 
 const app = express();
-const PORT = 3000;
+const server = http.createServer(app);
+const io = socketIo(server);
 
-// Enable CORS
-app.use(cors());
+const PORT = process.env.PORT || 3000;
 
-// Serve static files (like HTML, CSS, JS)
+// Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API Endpoint to search YouTube videos
-app.get('/api/search', async (req, res) => {
-    const query = req.query.q;
+// Store connected users
+const users = new Set();
 
-    if (!query) {
-        return res.status(400).json({ error: 'Query parameter "q" is required' });
+io.on('connection', (socket) => {
+  console.log('A user connected');
+
+  socket.on('new user', (username) => {
+    users.add(username);
+    socket.username = username;
+    io.emit('user list', Array.from(users));
+    io.emit('chat message', { user: 'System', message: `${username} joined the chat` });
+  });
+
+  socket.on('chat message', (msg) => {
+    io.emit('chat message', { user: socket.username, message: msg });
+  });
+
+  socket.on('disconnect', () => {
+    if (socket.username) {
+      users.delete(socket.username);
+      io.emit('user list', Array.from(users));
+      io.emit('chat message', { user: 'System', message: `${socket.username} left the chat` });
     }
-
-    try {
-        const results = await ytSearch(query);
-        const videos = results.videos.slice(0, 10).map(video => ({
-            title: video.title,
-            url: video.url,
-            duration: video.timestamp,
-            views: video.views,
-            uploaded: video.ago
-        }));
-
-        res.json({ videos });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'An error occurred while searching for videos' });
-    }
+    console.log('A user disconnected');
+  });
 });
 
-// Default route to serve the frontend
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
 
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
